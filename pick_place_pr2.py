@@ -31,20 +31,64 @@ def get_normals(cloud):
 def pcl_callback(pcl_msg):
 
 # Exercise-2 TODOs:
-    print("in callback")
+    print("in pcl_callback")
     # TODO: Convert ROS msg to PCL data
+    pcl_data = ros_to_pcl(pcl_msg)
+
+    fil = pcl.StatisticalOutlierRemovalFilter_PointXYZRGB(pcl_data)
+    fil.set_mean_k(30)
+    fil.set_std_dev_mul_thresh(0.3)
+    filtered_data = fil.filter()
+
+    #ros_cloud_filtered = pcl_to_ros(filtered_data)
+    #pcl_objects_pub.publish(ros_cloud_filtered)
+    #return None
 
     # TODO: Voxel Grid Downsampling
+    vox = filtered_data.make_voxel_grid_filter()
+    LEAF_SIZE = 0.01   
+    vox.set_leaf_size(LEAF_SIZE, LEAF_SIZE, LEAF_SIZE)
+    cloud_filtered = vox.filter()
 
     # TODO: PassThrough Filter
+    passthrough = cloud_filtered.make_passthrough_filter()
+    filter_axis = 'z'
+    passthrough.set_filter_field_name (filter_axis)
+    axis_min = 0.6
+    axis_max = 1.5
+    passthrough.set_filter_limits (axis_min, axis_max)
+    cloud_filtered = passthrough.filter()
+
+    ros_cloud_filtered = pcl_to_ros(cloud_filtered)
+    pcl_objects_pub.publish(ros_cloud_filtered)
+
+
 
     # TODO: RANSAC Plane Segmentation
+    seg = cloud_filtered.make_segmenter()
+    seg.set_model_type(pcl.SACMODEL_PLANE)
+    seg.set_method_type(pcl.SAC_RANSAC)
 
     # TODO: Extract inliers and outliers
+    max_distance = 0.02
+    seg.set_distance_threshold(max_distance)
+    inliers, coefficients = seg.segment()
+    extracted_inliers = cloud_filtered.extract(inliers, negative=False)
+    extracted_outliers = cloud_filtered.extract(inliers, negative=True)
 
     # TODO: Euclidean Clustering
+    white_cloud = XYZRGB_to_XYZ(extracted_outliers) # Apply function to convert XYZRGB to XYZ
+    tree = white_cloud.make_kdtree()
 
     # TODO: Create Cluster-Mask Point Cloud to visualize each cluster separately
+    ec = white_cloud.make_EuclideanClusterExtraction()
+    ec.set_ClusterTolerance(0.03)
+    ec.set_MinClusterSize(50)
+    ec.set_MaxClusterSize(2500)
+    ec.set_SearchMethod(tree)
+    # Extract indices for each of the discovered clusters
+    cluster_indices = ec.Extract()
+    cluster_color = get_color_list(len(cluster_indices))
 
     # TODO: Convert PCL data to ROS messages
 
@@ -65,6 +109,10 @@ def pcl_callback(pcl_msg):
         # Add the detected object to the list of detected objects.
 
     # Publish the list of detected objects
+    ros_cloud_objects = pcl_to_ros(extracted_outliers)
+    ros_cloud_table = pcl_to_ros(extracted_inliers)
+    pcl_objects_pub.publish(ros_cloud_objects)
+    pcl_table_pub.publish(ros_cloud_table)
 
 
 # function to load parameters and request PickPlace service
@@ -113,6 +161,8 @@ if __name__ == '__main__':
     pcl_sub = rospy.Subscriber("/pr2/world/points", pc2.PointCloud2, pcl_callback, queue_size=1)
 
     # TODO: Create Publishers
+    pcl_objects_pub = rospy.Publisher("/pcl_objects", PointCloud2, queue_size=1)
+    pcl_table_pub = rospy.Publisher("/pcl_table", PointCloud2, queue_size=1)
 
     # TODO: Load Model From disk
 
