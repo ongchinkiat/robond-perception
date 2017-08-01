@@ -17,11 +17,17 @@ from sensor_stick.pcl_helper import *
 import rospy
 import tf
 from geometry_msgs.msg import Pose
+from geometry_msgs.msg import Point, Quaternion
+
+#import sys
+#print(sys.path)
+
 from std_msgs.msg import Float64
 from std_msgs.msg import Int32
 from std_msgs.msg import String
 from pr2_robot.srv import *
-#from pr2_robot.rospy_message_converter import message_converter
+from rospy_message_converter import message_converter
+#import message_converter
 import yaml
 
 
@@ -38,6 +44,35 @@ def make_yaml_dict(test_scene_num, arm_name, object_name, pick_pose, place_pose)
     yaml_dict["pick_pose"] = message_converter.convert_ros_message_to_dictionary(pick_pose)
     yaml_dict["place_pose"] = message_converter.convert_ros_message_to_dictionary(place_pose)
     return yaml_dict
+
+def make_pick_ros(test_num, pick_item, this_object):
+    test_scene_num = Int32()
+    test_scene_num.data = test_num
+    object_name = String()
+    object_name.data = pick_item['name']
+
+    pick_pose = Pose()
+    pick_pose.position = Point(this_object['pos_x'], this_object['pos_y'], this_object['pos_z'])
+    pick_pose.orientation = Quaternion(0.0, 0.0, 0.0, 0.0)
+
+    arm_name = String()
+    place_pose = Pose()
+    # green tray at the right, [0,-0.71,0.605]
+    # red tray at the left, [0,0.71,0.605]
+    tray_x = 0.0
+    tray_y = 0.71
+    tray_z = 0.605 + 0.4
+
+    if pick_item['group'] == 'green':
+        arm_name.data = 'right'
+        place_pose.position = Point(tray_x, -tray_y, tray_z)
+        place_pose.orientation = Quaternion(0.0, 0.0, 0.0, 0.0)
+    else:
+        arm_name.data = 'left'
+        place_pose.position = Point(tray_x, tray_y, tray_z)
+        place_pose.orientation = Quaternion(0.0, 0.0, 0.0, 0.0)
+    
+    return test_scene_num, arm_name, object_name, pick_pose, place_pose
 
 # Helper function to output to yaml file
 def send_to_yaml(yaml_filename, dict_list):
@@ -61,7 +96,7 @@ def pcl_callback(pcl_msg):
     # pick_list = read_pick_list_yaml()
     pick_list = rospy.get_param('/object_list')
 
-# Exercise-2 TODOs:
+    # Exercise-2 TODOs:
     print("in pcl_callback")
     # TODO: Convert ROS msg to PCL data
     pcl_data = ros_to_pcl(pcl_msg)
@@ -133,7 +168,7 @@ def pcl_callback(pcl_msg):
 
     collision_cloud = cloud_filtered
 
-# Exercise-3 TODOs:
+    # Exercise-3 TODOs:
 
     # Classify the clusters! (loop through each detected cluster one at a time)
     detected_objects_labels = []
@@ -311,6 +346,8 @@ def pr2_mover():
 
         # TODO: Output your request parameters into output yaml file
 
+# run_state: Detect -> Scan -> Pick
+run_state = 'Detect'
 
 
 if __name__ == '__main__':
