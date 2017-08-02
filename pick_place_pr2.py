@@ -89,43 +89,12 @@ def read_pick_list_yaml():
     #print(data_loaded)
     return data_loaded['object_list']
 
-
-# Callback function for your Point Cloud Subscriber
-def pcl_callback(pcl_msg):
+# Function for Object Detection
+def object_detection(cloud_filtered):
+    detection_count += 1
 
     # pick_list = read_pick_list_yaml()
     pick_list = rospy.get_param('/object_list')
-
-    # Exercise-2 TODOs:
-    print("in pcl_callback")
-    # TODO: Convert ROS msg to PCL data
-    pcl_data = ros_to_pcl(pcl_msg)
-
-    fil = pcl.StatisticalOutlierRemovalFilter_PointXYZRGB(pcl_data)
-    fil.set_mean_k(30)
-    fil.set_std_dev_mul_thresh(0.3)
-    filtered_data = fil.filter()
-
-    #ros_cloud_filtered = pcl_to_ros(filtered_data)
-    #pcl_objects_pub.publish(ros_cloud_filtered)
-    #return None
-
-    # TODO: Voxel Grid Downsampling
-    vox = filtered_data.make_voxel_grid_filter()
-    LEAF_SIZE = 0.01   
-    vox.set_leaf_size(LEAF_SIZE, LEAF_SIZE, LEAF_SIZE)
-    cloud_filtered = vox.filter()
-
-    # top of table z = 0.63
-
-    # TODO: PassThrough Filter
-    passthrough = cloud_filtered.make_passthrough_filter()
-    filter_axis = 'z'
-    passthrough.set_filter_field_name (filter_axis)
-    axis_min = 0.6
-    axis_max = 1.5
-    passthrough.set_filter_limits (axis_min, axis_max)
-    cloud_filtered = passthrough.filter()
 
     passthrough = cloud_filtered.make_passthrough_filter()
     filter_axis = 'x'
@@ -139,6 +108,7 @@ def pcl_callback(pcl_msg):
     #pcl_objects_pub.publish(ros_cloud_filtered)
     #return None
 
+    collision_cloud = cloud_filtered
 
     # TODO: RANSAC Plane Segmentation
     seg = cloud_filtered.make_segmenter()
@@ -166,7 +136,6 @@ def pcl_callback(pcl_msg):
     cluster_indices = ec.Extract()
     cluster_color = get_color_list(len(cluster_indices))
 
-    collision_cloud = cloud_filtered
 
     # Exercise-3 TODOs:
 
@@ -286,8 +255,8 @@ def pcl_callback(pcl_msg):
     #print("Centroid List")
     #print(centroid_list)
 
-    print("Object List")
-    print(object_list)
+    #print("Object List")
+    #print(object_list)
 
     print("Objects in Pick List",len(pick_list))
     print("Objects in Detected List",len(object_list))
@@ -298,6 +267,51 @@ def pcl_callback(pcl_msg):
                 num_detected += 1
 
     print("Correctly Detected Objects",num_detected)
+
+    # go to next state if detection complete
+    if num_detected >= len(pick_list):
+        run_state = 'Scan'
+    elif detection_count > max_detection_count:
+        run_state = 'Scan'
+
+
+# Callback function for your Point Cloud Subscriber
+def pcl_callback(pcl_msg):
+
+    # Exercise-2 TODOs:
+    print("in pcl_callback")
+    # TODO: Convert ROS msg to PCL data
+    pcl_data = ros_to_pcl(pcl_msg)
+
+    fil = pcl.StatisticalOutlierRemovalFilter_PointXYZRGB(pcl_data)
+    fil.set_mean_k(30)
+    fil.set_std_dev_mul_thresh(0.3)
+    filtered_data = fil.filter()
+
+    #ros_cloud_filtered = pcl_to_ros(filtered_data)
+    #pcl_objects_pub.publish(ros_cloud_filtered)
+    #return None
+
+    # TODO: Voxel Grid Downsampling
+    vox = filtered_data.make_voxel_grid_filter()
+    LEAF_SIZE = 0.01   
+    vox.set_leaf_size(LEAF_SIZE, LEAF_SIZE, LEAF_SIZE)
+    cloud_filtered = vox.filter()
+
+    # top of table z = 0.63
+
+    # TODO: PassThrough Filter
+    passthrough = cloud_filtered.make_passthrough_filter()
+    filter_axis = 'z'
+    passthrough.set_filter_field_name (filter_axis)
+    axis_min = 0.6
+    axis_max = 1.5
+    passthrough.set_filter_limits (axis_min, axis_max)
+    cloud_filtered = passthrough.filter()
+
+    if run_state == 'Detect':
+        object_detection(cloud_filtered)
+    elif run_state == 'Scan':
 
     # Suggested location for where to invoke your pr2_mover() function within pcl_callback()
     # Could add some logic to determine whether or not your object detections are robust
@@ -349,6 +363,13 @@ def pr2_mover():
 # run_state: Detect -> Scan -> Pick
 run_state = 'Detect'
 
+# Number of times we run the detection
+detection_count = 0
+# Max number of times we run the detection
+max_detection_count = 10
+
+# collision_cloud as global variable
+collision_cloud = pcl.PointCloud_PointXYZRGB()
 
 if __name__ == '__main__':
 
