@@ -30,6 +30,43 @@ from rospy_message_converter import message_converter
 #import message_converter
 import yaml
 
+StateStore = {}
+
+# EDIT this to match the test world number
+StateStore['test_num'] = 1
+
+# run_state: Detect -> ScanLeft -> ScanRight -> GoCenter -> Pick
+StateStore['run_state'] = 'Detect'
+
+# run_mode: Normal, SkipScan
+StateStore['run_mode'] = 'Normal'
+
+# Number of times we run the detection
+StateStore['detection_count'] = 0
+# Max number of times we run the detection
+StateStore['max_detection_count'] = 10
+
+StateStore['scan_left_count'] = 0
+StateStore['max_scan_left_count'] = 7
+
+StateStore['scan_right_count'] = 0
+StateStore['max_scan_right_count'] = 14
+
+StateStore['go_center_count'] = 0
+StateStore['max_go_center_count'] = 7
+
+# collision_cloud as global variable
+StateStore['collision_cloud'] = pcl.PointCloud_PointXYZRGB()
+
+
+StateStore['detected_objects_labels'] = []
+StateStore['detected_objects'] = []
+
+StateStore['pick_list'] = []
+StateStore['object_list'] = []
+
+StateStore['pick_ros_list'] = []
+StateStore['label_marker_list'] = []
 
 def get_normals(cloud):
     get_normals_prox = rospy.ServiceProxy('/feature_extractor/get_normals', GetNormals)
@@ -61,7 +98,7 @@ def make_pick_ros(test_num, pick_item, this_object):
     # red tray at the left, [0,0.71,0.605]
     tray_x = 0.0
     tray_y = 0.71
-    tray_z = 0.605 + 0.4
+    tray_z = 0.605 + 0.1
 
     if pick_item['group'] == 'green':
         arm_name.data = 'right'
@@ -73,6 +110,24 @@ def make_pick_ros(test_num, pick_item, this_object):
         place_pose.orientation = Quaternion(0.0, 0.0, 0.0, 0.0)
     
     return test_scene_num, arm_name, object_name, pick_pose, place_pose
+
+def generate_full_ros_pick():
+    global StateStore
+    pick_ros = []
+    pick_yaml = []
+
+    test_num = StateStore['test_num']
+    for item in StateStore['pick_list']:
+        for obj in StateStore['object_list']:
+            if item['name'] == obj['object_name']:
+                test_scene_num, arm_name, object_name, pick_pose, place_pose = make_pick_ros(test_num, item, obj)
+                pick_ros.append([test_scene_num, arm_name, object_name, pick_pose, place_pose])
+                yaml = make_yaml_dict(test_scene_num, arm_name, object_name, pick_pose, place_pose)
+                pick_yaml.append(yaml)
+
+    send_to_yaml("output_" + str(test_num) + ".yaml", pick_yaml)
+    StateStore['pick_ros_list'] = pick_ros
+    #print(pick_ros)
 
 # Helper function to output to yaml file
 def send_to_yaml(yaml_filename, dict_list):
@@ -89,9 +144,42 @@ def read_pick_list_yaml():
     #print(data_loaded)
     return data_loaded['object_list']
 
+# add append_cloud points into main_cloud
+def merge_pcl_cloud(main_cloud, append_cloud):
+    XYZRGB_cloud = pcl.PointCloud_PointXYZRGB()
+    points_list = []
+
+    float_rgb = rgb_to_float([200,0,200])
+    x_min = 0.33
+    z_min = 0.62
+
+    for data in main_cloud:
+        # ignore the objects
+        if (data[0] > x_min) and (data[2] > z_min):
+            abc = 1
+        else:
+            points_list.append([data[0], data[1], data[2], float_rgb])
+    for data in append_cloud:
+        if (data[0] > x_min) and (data[2] > z_min):
+            abc = 1
+        else:
+            points_list.append([data[0], data[1], data[2], float_rgb])
+
+    XYZRGB_cloud.from_list(points_list)
+
+    # Voxel Grid Downsampling to remove repeated points
+    vox = XYZRGB_cloud.make_voxel_grid_filter()
+    LEAF_SIZE = 0.01   
+    vox.set_leaf_size(LEAF_SIZE, LEAF_SIZE, LEAF_SIZE)
+    XYZRGB_cloud = vox.filter()
+
+    return XYZRGB_cloud
+
 # Function for Object Detection
 def object_detection(cloud_filtered):
-    detection_count += 1
+    global StateStore
+    StateStore['detection_count'] += 1
+    print(StateStore['run_state'],StateStore['detection_count'],StateStore['max_detection_count'])
 
     # pick_list = read_pick_list_yaml()
     pick_list = rospy.get_param('/object_list')
@@ -149,6 +237,7 @@ def object_detection(cloud_filtered):
     #centroid_list = []
     object_list = []
     min_z = 5
+    label_list = []
 
     # Grab the points for the cluster
     for j, indices in enumerate(cluster_indices):
@@ -217,6 +306,7 @@ def object_detection(cloud_filtered):
         label_pos = list(white_cloud[indices[0]])
         label_pos[2] += .4
         object_markers_pub.publish(make_label(label,label_pos, j))
+        label_list.append([label,label_pos, j])
 
         # Add the detected object to the list of detected objects.
         do = DetectedObject()
@@ -269,10 +359,58 @@ def object_detection(cloud_filtered):
     print("Correctly Detected Objects",num_detected)
 
     # go to next state if detection complete
-    if num_detected >= len(pick_list):
-        run_state = 'Scan'
-    elif detection_count > max_detection_count:
-        run_state = 'Scan'
+    if (num_detected >= len(pick_list)) or (StateStore['detection_count'] >= StateStore['max_detection_count']):
+        # save into global variable
+        StateStore['detected_objects_labels'] = detected_objects_labels
+        StateStore['detected_objects'] = detected_objects
+        StateStore['pick_list'] = pick_list
+        StateStore['object_list'] = object_list
+        StateStore['label_marker_list'] = label_list
+        generate_full_ros_pick()
+
+        # go to next step
+        if StateStore['run_mode'] == 'SkipScan':
+            StateStore['run_state'] = 'LoadCollisionMap'
+        else:
+            StateStore['run_state'] = 'ScanLeft'
+            pub_world_joint.publish(np.pi / 2)
+
+
+def scan_left(cloud_filtered):
+    global StateStore
+    StateStore['scan_left_count'] += 1
+    print(StateStore['run_state'],StateStore['scan_left_count'],StateStore['max_scan_left_count'])
+
+    StateStore['collision_cloud'] = merge_pcl_cloud(StateStore['collision_cloud'], cloud_filtered)
+
+    # go to next state if Scan Left complete
+    if (StateStore['scan_left_count'] >= StateStore['max_scan_left_count']):
+        StateStore['run_state'] = 'ScanRight'
+        pub_world_joint.publish(-np.pi / 2)
+
+def scan_right(cloud_filtered):
+    global StateStore
+    StateStore['scan_right_count'] += 1
+    print(StateStore['run_state'],StateStore['scan_right_count'],StateStore['max_scan_right_count'])
+
+    StateStore['collision_cloud'] = merge_pcl_cloud(StateStore['collision_cloud'], cloud_filtered)
+
+    # go to next state if Scan Left complete
+    if (StateStore['scan_right_count'] >= StateStore['max_scan_right_count']):
+        StateStore['run_state'] = 'GoCenter'
+        # Save collision cloud to disk
+        pickle.dump(StateStore['collision_cloud'], open('pr2_collision_cloud.sav', 'wb'))
+        pub_world_joint.publish(0.0)
+
+def go_center(cloud_filtered):
+    global StateStore
+    StateStore['go_center_count'] += 1
+    print(StateStore['run_state'],StateStore['go_center_count'],StateStore['max_go_center_count'])
+
+    # go to next state if Scan Left complete
+    if (StateStore['go_center_count'] >= StateStore['max_go_center_count']):
+        StateStore['run_state'] = 'Pick'
+
 
 
 # Callback function for your Point Cloud Subscriber
@@ -309,40 +447,50 @@ def pcl_callback(pcl_msg):
     passthrough.set_filter_limits (axis_min, axis_max)
     cloud_filtered = passthrough.filter()
 
-    if run_state == 'Detect':
+    global StateStore
+    if StateStore['run_state'] == 'Detect':
         object_detection(cloud_filtered)
-    elif run_state == 'Scan':
+    elif StateStore['run_state'] == 'ScanLeft':
+        scan_left(cloud_filtered)
+    elif StateStore['run_state'] == 'ScanRight':
+        scan_right(cloud_filtered)
+    elif StateStore['run_state'] == 'GoCenter':
+        go_center(cloud_filtered)
+    elif StateStore['run_state'] == 'LoadCollisionMap':
+        load_collision_map(cloud_filtered)
+    elif StateStore['run_state'] == 'Pick':
+        start_pick(cloud_filtered)
+    elif StateStore['run_state'] == 'Done':
+        print(StateStore['run_state'])
 
-    # Suggested location for where to invoke your pr2_mover() function within pcl_callback()
-    # Could add some logic to determine whether or not your object detections are robust
-    # before calling pr2_mover()
-    try:
-        pr2_mover()
-    except rospy.ROSInterruptException:
-        pass
+    ros_collision_cloud = pcl_to_ros(StateStore['collision_cloud'])
+    collision_map_pub.publish(ros_collision_cloud)
+
+    for thislabel in StateStore['label_marker_list']:
+        object_markers_pub.publish(make_label(thislabel[0],thislabel[1], thislabel[2]))
+
+
+def load_collision_map(cloud_filtered):
+    global StateStore
+    # Load collision cloud from disk
+    StateStore['collision_cloud'] = pickle.load(open('pr2_collision_cloud.sav', 'rb'))
+    StateStore['run_state'] = 'Pick'
 
 
 # function to load parameters and request PickPlace service
-def pr2_mover():
-
-    # TODO: Initialize variables
-
-    # TODO: Get/Read parameters
-
-    # TODO: Parse parameters into individual variables
-
-    # TODO: Rotate PR2 in place to capture side tables for the collision map
-    
+def start_pick(cloud_filtered):
+    global StateStore
     # pi/2 = facing red box in left
     #pub_world_joint.publish(np.pi / 2)
 
     # TODO: Loop through the pick list
-
+    for item in StateStore['pick_ros_list']:
         # TODO: Get the PointCloud for a given object and obtain it's centroid
-
-        # TODO: Create 'place_pose' for the object
-
-        # TODO: Assign the arm to be used for pick_place
+        test_scene_num = item[0]
+        arm_name = item[1]
+        object_name = item[2]
+        pick_pose = item[3]
+        place_pose = item[4]
 
         # Wait for 'pick_place_routine' service to come up
         rospy.wait_for_service('pick_place_routine')
@@ -351,25 +499,16 @@ def pr2_mover():
             pick_place_routine = rospy.ServiceProxy('pick_place_routine', PickPlace)
 
             # TODO: Insert your variables to be sent as a service request
-            #resp = pick_place_routine(TEST_SCENE_NUM, OBJECT_NAME, WHICH_ARM, PICK_POSE, PLACE_POSE)
+            print ("Start Picking: ",test_scene_num, object_name, arm_name)
+            resp = pick_place_routine(test_scene_num, object_name, arm_name, pick_pose, place_pose)
 
-            #print ("Response: ",resp.success)
+            print ("Response: ",resp.success)
 
         except rospy.ServiceException, e:
             print "Service call failed: %s"%e
 
         # TODO: Output your request parameters into output yaml file
-
-# run_state: Detect -> Scan -> Pick
-run_state = 'Detect'
-
-# Number of times we run the detection
-detection_count = 0
-# Max number of times we run the detection
-max_detection_count = 10
-
-# collision_cloud as global variable
-collision_cloud = pcl.PointCloud_PointXYZRGB()
+    StateStore['run_state'] = 'Done'
 
 if __name__ == '__main__':
 
@@ -401,6 +540,7 @@ if __name__ == '__main__':
     get_color_list.color_list = []
 
     print("Subscribed..")
+    #pub_world_joint.publish(0.0)
 
 
     # TODO: Spin while node is not shutdown

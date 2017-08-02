@@ -41,6 +41,7 @@ if __name__ == '__main__':
     rospy.init_node('capture_node')
 
     models = [\
+       'eraser',
        'biscuits',
        'book',
        'glue',
@@ -50,7 +51,7 @@ if __name__ == '__main__':
        'soda_can',
        'sticky_notes']
 
-#        'eraser',
+
 
     # Disable gravity and delete the ground plane
     initial_setup()
@@ -59,7 +60,7 @@ if __name__ == '__main__':
     for model_name in models:
         pr2_spawn_model(model_name)
 
-        for i in range(20):
+        for i in range(50):
             # make five attempts to get a valid a point cloud then give up
             sample_was_good = False
             try_count = 0
