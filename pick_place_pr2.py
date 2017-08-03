@@ -39,7 +39,7 @@ StateStore['test_num'] = 1
 StateStore['run_state'] = 'Detect'
 
 # run_mode: Normal, SkipScan
-StateStore['run_mode'] = 'Normal'
+StateStore['run_mode'] = 'SkipScan'
 
 # Number of times we run the detection
 StateStore['detection_count'] = 0
