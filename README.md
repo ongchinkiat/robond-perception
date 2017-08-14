@@ -1,5 +1,8 @@
 # Udacity Robotics Project 3 - 3D Perception
 
+The project python file is in pick_place_pr2.py
+
+
 ## Exercise 1: Pipeline for filtering and RANSAC plane fitting
 
 In this project, the input point cloud received from the camera is noisy.
@@ -77,4 +80,46 @@ cluster_indices = ec.Extract()
 
 ## Exercise 3: Object recognition
 
+For object recognition, the object color and normal histograms are computed.
+
+For each object model, 50 sample instances are used. The models are trained using SVM using a Linear Kernel.
+
 The trained model achieve an accuracy of 95%.
+
+![Confusion Matrix](https://github.com/ongchinkiat/robond-perception/raw/master/pr2_train_matrix.jpg "Confusion Matrix")
+
+In the perception pipeline, the histogram features are computed for each object, and prediction is done using the trained SVM model.
+
+```
+chists = compute_color_histograms(ros_this_object, using_hsv=True)
+normals = get_normals(ros_this_object)
+nhists = compute_normal_histograms(normals)
+
+feature = np.concatenate((chists, nhists))
+clf.predict(scaler.transform(feature.reshape(1,-1)))
+label = encoder.inverse_transform(prediction)[0]
+```
+
+## Pick and Place Setup
+
+The 3 test worlds are used to test out the object recognition model. The outputs are saved in output_1.yaml, output_2.yaml, output_3.yaml.
+
+The pipeline achieve 100% recognition in all 3 test worlds.
+
+To make the PR2 robot complete the pick and place tasks, a simple state machine was added to the pick_place_pr2.py script. The states are: Detect -> ScanLeft -> ScanRight -> GoCenter -> Pick.
+
+I have uploaded a video of the simulator running all these tasks for World 1.
+
+Video URL: https://youtu.be/SIkD2-r9jj4
+
+<a href="http://www.youtube.com/watch?feature=player_embedded&v=SIkD2-r9jj4" target="_blank"><img src="http://img.youtube.com/vi/SIkD2-r9jj4/0.jpg"
+alt="PR2 Pick and Place" width="240" height="180" border="1" /></a>
+
+
+In the first state, Detect, the whole recognition pipeline is run to detect the objects. Since the input is noisy, a few detection rounds may be needed.
+
+In the next 2 state, ScanLeft and ScanRight, we sent commands to the World Joint of the robot to make it turn left, then right. While the robot is turning, a collision map generation pipeline is used to map out the table and the drop box.
+
+Once the complete collision map is generated, we make the robot go back to the center position, in the GoCenter state.
+
+Finally, in the Pick state, we go through the recognised object list and send the pick and place command using the pick_place_routine.
