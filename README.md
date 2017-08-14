@@ -84,6 +84,8 @@ For object recognition, the object color and normal histograms are computed.
 
 For each object model, 50 sample instances are used. The models are trained using SVM using a Linear Kernel.
 
+The scripts for feature capture and training are in pr2_capture_features.py and pr2_train_svm.py.
+
 The trained model achieve an accuracy of 95%.
 
 ![Confusion Matrix](https://github.com/ongchinkiat/robond-perception/raw/master/pr2_train_matrix.jpg "Confusion Matrix")
