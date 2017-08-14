@@ -106,6 +106,15 @@ The 3 test worlds are used to test out the object recognition model. The outputs
 
 The pipeline achieve 100% recognition in all 3 test worlds.
 
+World 1:
+![World 1](https://github.com/ongchinkiat/robond-perception/raw/master/world1.jpg "World 1")
+
+World 2:
+![World 2](https://github.com/ongchinkiat/robond-perception/raw/master/world2.jpg "World 2")
+
+World 3:
+![World 3](https://github.com/ongchinkiat/robond-perception/raw/master/world3.jpg "World 3")
+
 To make the PR2 robot complete the pick and place tasks, a simple state machine was added to the pick_place_pr2.py script. The states are: Detect -> ScanLeft -> ScanRight -> GoCenter -> Pick.
 
 I have uploaded a video of the simulator running all these tasks for World 1.
@@ -119,6 +128,9 @@ alt="PR2 Pick and Place" width="240" height="180" border="1" /></a>
 In the first state, Detect, the whole recognition pipeline is run to detect the objects. Since the input is noisy, a few detection rounds may be needed.
 
 In the next 2 state, ScanLeft and ScanRight, we sent commands to the World Joint of the robot to make it turn left, then right. While the robot is turning, a collision map generation pipeline is used to map out the table and the drop box.
+
+Collision Map Generation:
+![Collision Map](https://github.com/ongchinkiat/robond-perception/raw/master/collisionmap.jpg "Collision Map")
 
 Once the complete collision map is generated, we make the robot go back to the center position, in the GoCenter state.
 
